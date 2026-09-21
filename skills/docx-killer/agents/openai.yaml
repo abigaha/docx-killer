@@ -1,0 +1,4 @@
+interface:
+  display_name: "DOCX Killer"
+  short_description: "Edit, template, inspect, and convert DOCX with fidelity checks"
+  default_prompt: "Use $docx-killer to inspect this Word document, make the requested edits, and verify content and formatting preservation."

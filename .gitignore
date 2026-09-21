@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+.work/
+test-output/
+*.docx
+*.pdf
+*.png
+*.log
+.env
+.env.*
+!.env.example
