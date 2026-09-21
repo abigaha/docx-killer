@@ -29,10 +29,14 @@ The integration tests intentionally require all four installed tools. Tests synt
 
 ```powershell
 python skills/docx-killer/scripts/docx_ops.py inspect input.docx --text
+python skills/docx-killer/scripts/docx_ops.py inspect input.docx --summary --text --story word/document.xml --paragraph-range 0:20 --tables --media
 python skills/docx-killer/scripts/docx_ops.py replace input.docx edited.docx --old 'Old name' --new 'New name' --expected 2
 python skills/docx-killer/scripts/docx_ops.py render template.docx context.json generated.docx
 python skills/docx-killer/scripts/docx_ops.py compare input.docx edited.docx
+python skills/docx-killer/scripts/docx_ops.py verify generated.docx --render auto --output-dir render-output
 node skills/docx-killer/scripts/mammoth_extract.cjs input.docx preview.html
 ```
+
+`verify` checks package structure and reopens the document with `python-docx`. When an Office renderer is available it also exports a PDF and, when Poppler is installed, creates one PNG preview per page. The JSON report distinguishes skipped, unavailable, and rendered states; PDF export does not by itself prove correct pagination or absence of visual overlap.
 
 Read [the skill](skills/docx-killer/SKILL.md) for selection rules and [verification](skills/docx-killer/references/verification.md) for the limits of structural versus visual checks.

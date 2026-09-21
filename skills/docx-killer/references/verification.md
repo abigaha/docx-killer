@@ -1,9 +1,17 @@
 # Verify content, structure, and appearance separately
 
+The repeatable entry point is:
+
+```powershell
+python scripts/docx_ops.py verify output.docx --render auto --output-dir render-output
+```
+
+The JSON report contains `structure`, `reopen`, `render`, and `limitations`. Use `--render never` for a deterministic check on machines without an office application. Use `--render word` when Word/WPS compatibility is required and `--render libreoffice` when LibreOffice is the known target.
+
 ## Three levels of evidence
 
 1. **Content:** Requested values, replacement count, required sections, table rows, notes/comments, and selected revision view are correct. Check more than `Document.paragraphs` when content lives in other stories.
-2. **Structure:** Reopen the DOCX, inspect package errors and part differences, confirm relationships/media/numbering/section changes are intended. Structural success does not prove page layout.
+2. **Structure:** Reopen the DOCX, inspect package errors and part differences, confirm relationships/media/numbering/section changes are intended. The inspector reports advanced feature counts with the story parts where they occur. Structural success does not prove page layout.
 3. **Appearance and behavior:** Open/render in the target office engine, check pages and editable behavior such as fields, hyperlinks, revisions, notes, and image wrapping. Report the renderer and any untested behavior.
 
 ```powershell
@@ -29,7 +37,7 @@ Microsoft Word automation can open a copy, update selected fields, repaginate, a
 
 WPS automation availability and API compatibility depend on the installed edition. Use it only after confirming the actual application and operations work. Do not label a WPS-rendered result as Word-verified.
 
-If no renderer can be used, deliver structural checks and explicitly state that page layout has not been visually verified. Do not substitute Mammoth HTML or Pandoc PDF as evidence of the original Word layout.
+If no renderer can be used, deliver structural checks and explicitly state that page layout has not been visually verified. Do not substitute Mammoth HTML or Pandoc PDF as evidence of the original Word layout. `verify` can rasterize a rendered PDF with Poppler (`pdfinfo` and `pdftoppm`) into page PNGs; inspect those images rather than relying on page count alone.
 
 ## Page inspection
 

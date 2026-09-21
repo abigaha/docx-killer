@@ -1,8 +1,10 @@
+import base64
 import hashlib
 import importlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -45,6 +47,13 @@ class DocumentOperations(unittest.TestCase):
         doc.add_paragraph(text)
         doc.save(self.source)
         return doc
+
+    def add_test_picture(self, doc):
+        image = self.root / 'pixel.png'
+        image.write_bytes(base64.b64decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+        ))
+        doc.add_picture(str(image))
 
     def test_cross_run_replacement_preserves_unrelated_parts_and_formatting(self):
         doc = Document()
@@ -170,6 +179,99 @@ class DocumentOperations(unittest.TestCase):
         self.assertEqual(diff['changed'], ['word/document.xml'])
         self.assertEqual(diff['added'], [])
         self.assertEqual(diff['removed'], [])
+
+    def test_inspection_filters_large_reports_without_losing_counts(self):
+        doc = Document()
+        for index in range(6):
+            doc.add_paragraph(f'Paragraph {index}')
+        doc.add_table(rows=2, cols=2)
+        self.add_test_picture(doc)
+        doc.save(self.source)
+        report = ops.inspect_document(
+            self.source,
+            include_text=True,
+            summary=True,
+            stories=['word/document.xml'],
+            paragraph_range=(2, 4),
+            include_tables=True,
+            include_media=True,
+        )
+        self.assertNotIn('parts', report)
+        story = report['stories']['word/document.xml']
+        self.assertEqual(story['paragraph_count'], 11)
+        self.assertEqual([item['index'] for item in story['paragraphs']], [2, 3])
+        self.assertEqual(len(story['tables']), 1)
+        self.assertEqual(report['media']['count'], 1)
+        self.assertEqual(report['media']['items'][0]['part'], 'word/media/image1.png')
+
+    def test_advanced_structure_warning_names_features_and_stories(self):
+        doc = Document()
+        doc.add_paragraph('Before')
+        self.add_test_picture(doc)
+        doc.save(self.source)
+        report = ops.inspect_package(self.source)
+        warning = next(item for item in report['warnings'] if item.startswith('Advanced structures present:'))
+        self.assertIn('drawings=1', warning)
+        self.assertIn('word/document.xml', warning)
+
+    def test_verify_document_reports_reopen_statistics_without_rendering(self):
+        doc = Document()
+        doc.add_paragraph('One')
+        doc.add_table(rows=1, cols=1).cell(0, 0).text = 'Two'
+        doc.save(self.source)
+        report = ops.verify_document(self.source, render='never')
+        self.assertEqual(report['status'], 'passed')
+        self.assertEqual(report['structure']['errors'], [])
+        self.assertEqual(report['reopen']['paragraphs'], 1)
+        self.assertEqual(report['reopen']['tables'], 1)
+        self.assertEqual(report['render']['status'], 'skipped')
+        self.assertIn('Layout was not rendered', report['limitations'])
+
+    @unittest.skipUnless(__import__('shutil').which('pdfinfo') and __import__('shutil').which('pdftoppm'), 'Poppler is not installed')
+    def test_pdf_artifacts_report_page_count_and_create_previews(self):
+        from PIL import Image
+        pdf = self.root / 'rendered.pdf'
+        Image.new('RGB', (100, 100), 'white').save(pdf, 'PDF')
+        pages = self.root / 'pages'
+        pages.mkdir()
+        (pages / 'page-99.png').write_bytes(b'stale')
+        report = ops.pdf_artifacts(pdf, pages)
+        self.assertEqual(report['page_count'], 1)
+        self.assertEqual(len(report['previews']), 1)
+        self.assertIn('creator', report)
+        self.assertIn('producer', report)
+        self.assertTrue(Path(report['previews'][0]).is_file())
+
+    def test_subprocess_output_uses_windows_local_code_page(self):
+        with mock.patch.object(ops.locale, 'getpreferredencoding', return_value='cp936'):
+            self.assertEqual(ops.decode_output('WPS 文字'.encode('cp936')), 'WPS 文字')
+
+    def test_explicit_unavailable_renderer_fails(self):
+        self.save_text('One')
+        with mock.patch.object(ops.shutil, 'which', return_value=None):
+            with self.assertRaisesRegex(RuntimeError, 'renderer is unavailable'):
+                ops._render_document(self.source, self.root / 'render', 'word')
+
+    def test_cli_verify_and_filtered_inspect_emit_json(self):
+        import json
+        import subprocess
+        self.save_text('One')
+        cli = SCRIPTS / 'docx_ops.py'
+        inspect = subprocess.run([sys.executable, str(cli), 'inspect', str(self.source), '--summary', '--text', '--paragraph-range', '0:1'], capture_output=True, text=True, encoding='utf-8')
+        self.assertEqual(inspect.returncode, 0, inspect.stderr)
+        self.assertNotIn('"parts"', inspect.stdout)
+        verify = subprocess.run([sys.executable, str(cli), 'verify', str(self.source), '--render', 'never'], capture_output=True, text=True, encoding='utf-8')
+        self.assertEqual(verify.returncode, 0, verify.stderr)
+        self.assertEqual(json.loads(verify.stdout)['status'], 'passed')
+
+    def test_cli_verify_returns_nonzero_for_failed_structure(self):
+        import subprocess
+        self.save_text('One')
+        rels = b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rBad" Type="image" Target="media/missing.png"/></Relationships>'
+        alter_package(self.source, 'word/_rels/document.xml.rels', rels)
+        cli = SCRIPTS / 'docx_ops.py'
+        verify = subprocess.run([sys.executable, str(cli), 'verify', str(self.source), '--render', 'never'], capture_output=True, text=True, encoding='utf-8')
+        self.assertNotEqual(verify.returncode, 0)
 
     def test_signed_package_refused(self):
         self.save_text()

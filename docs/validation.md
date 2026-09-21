@@ -4,7 +4,7 @@ Environment checked on 2026-09-21: Windows, Python 3.14.7, python-docx 1.2.0, do
 
 ## Automated checks
 
-`python -m unittest discover -s tests -v` passed 17 tests in the initial full run. Tests use synthetic temporary documents and cover cross-run replacement, retained formatting and untouched parts, Chinese/XML-sensitive strings, replacement counts, no overwrite, failure outputs, protected bookmarks/revisions/fields, explicit header scope, relationships, signed-package refusal, strict templates, repeated rows, Windows tool discovery, actual Pandoc conversion, and actual npm Mammoth HTML/text extraction.
+`python -m unittest discover -s tests -v` passed 25 tests after the verification workflow update. Tests use synthetic temporary documents and cover cross-run replacement, retained formatting and untouched parts, Chinese/XML-sensitive strings, replacement counts, no overwrite, failure outputs, protected bookmarks/revisions/fields, explicit header scope, relationships, signed-package refusal, strict templates, repeated rows, filtered inspection, feature locations, CLI exit status, explicit renderer failure, stale preview cleanup, PDF page previews, Windows code-page decoding, Windows tool discovery, actual Pandoc conversion, and actual npm Mammoth HTML/text extraction.
 
 The helper tests were run before helper implementation and failed because the helpers were absent. Independent baseline reasoning selected the right tools but its illustrative replacement code could leave partial output and did not prevent bookmark/hyperlink boundary changes. The implemented helper deliberately refuses protected paragraphs and publishes only after validation.
 
@@ -14,7 +14,7 @@ An independent forward-test agent loaded the skill and confirmed all four depend
 
 ## Rendering probe
 
-A synthetic one-page DOCX was exported through the installed `Word.Application` compatibility interface. The resulting PDF was checked with `pdfinfo`, rasterized with `pdftoppm`, and visually inspected: heading and body text appeared without clipping. PDF metadata identifies the creator as **WPS**, despite the COM application name reporting Microsoft Word 12.0.
+A seven-page report DOCX was exported through the installed `Word.Application` compatibility interface using `docx_ops.py verify --render auto`. The resulting PDF was checked with `pdfinfo` and rasterized with `pdftoppm` into seven page previews. PDF metadata identifies the creator as **WPS 文字**, despite the COM application name reporting Microsoft Word 12.0. The verification report now records both signals so callers do not need to trust the COM product name alone.
 
 PDF export succeeded; closing the automation instance returned RPC unavailable (0x800706BA). Therefore this is evidence of a successful WPS export and a cleanup compatibility limitation, not a robust Word automation workflow or broad visual fidelity certification. No personal documents were used. The probe and output files are excluded from Git.
 

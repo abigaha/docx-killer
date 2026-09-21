@@ -16,7 +16,8 @@ Architecture: `skills/docx-killer/SKILL.md` routes to focused references and exe
 - [x] Implement package inspection/comparison, conservative text replacement, strict template rendering, Windows discovery, and npm Mammoth conversion.
 - [x] Write compact skill routing and focused references for the four tools, OOXML, and visual verification.
 - [x] Exercise all four installed tools against generated examples. An independent forward-test started but its isolated command environment failed before producing a result; automated integration tests and manual WPS rendering provide the recorded evidence instead.
-- [x] Validate skill metadata and install/verify the local skill. Commit, push, and remote verification are the final delivery actions.
+- [x] Add filtered inspection, feature locations, unified verification, optional Office rendering, PDF metadata, and page PNG generation.
+- [x] Validate skill metadata and run automated plus real-document rendering checks. Commit, push, and local installation synchronization are the final delivery actions.
 
 ## Verification contract
 

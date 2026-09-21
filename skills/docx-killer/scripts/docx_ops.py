@@ -2,16 +2,180 @@
 import argparse
 import fnmatch
 import json
+import locale
 import os
 import re
 import sys
 import tempfile
+import subprocess
+import shutil
 from pathlib import Path
 from zipfile import ZipFile
 
 from lxml import etree
 
 from docx_package import W, NS, compare_packages, inspect_entries, inspect_package, load_package, paragraph_text, parse_xml
+
+
+def decode_output(data):
+    return data.decode(locale.getpreferredencoding(False), errors='replace')
+
+
+def inspect_document(source, include_text=False, summary=False, stories=None, paragraph_range=None, include_tables=False, include_media=False):
+    _, entries = load_package(source)
+    report = inspect_entries(entries, include_text or paragraph_range is not None)
+    if stories:
+        selected = set(stories)
+        missing = selected - report['stories'].keys()
+        if missing:
+            raise ValueError('Story not found: ' + ', '.join(sorted(missing)))
+        report['stories'] = {name: value for name, value in report['stories'].items() if name in selected}
+    if paragraph_range is not None:
+        start, end = paragraph_range
+        if start < 0 or end <= start:
+            raise ValueError('Paragraph range must be START:END with 0 <= START < END')
+        for story in report['stories'].values():
+            story['paragraphs'] = [item for item in story.get('paragraphs', []) if start <= item['index'] < end]
+    if include_tables:
+        for name, story in report['stories'].items():
+            root = parse_xml(entries[name])
+            story['tables'] = []
+            for index, table in enumerate(root.findall('.//w:tbl', NS)):
+                rows = table.findall('./w:tr', NS)
+                story['tables'].append({
+                    'index': index,
+                    'row_count': len(rows),
+                    'column_counts': [len(row.findall('./w:tc', NS)) for row in rows],
+                })
+    if include_media:
+        items = [
+            {'part': name, 'bytes': len(data)}
+            for name, data in sorted(entries.items())
+            if name.startswith('word/media/') and not name.endswith('/')
+        ]
+        report['media'] = {'count': len(items), 'items': items}
+    if summary:
+        report.pop('parts', None)
+    return report
+
+
+def pdf_artifacts(pdf, output_dir):
+    pdf = Path(pdf).resolve()
+    output_dir = Path(output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pdfinfo = shutil.which('pdfinfo')
+    pdftoppm = shutil.which('pdftoppm')
+    if not pdfinfo or not pdftoppm:
+        return {'page_count': None, 'previews': [], 'creator': None, 'producer': None, 'warning': 'Poppler pdfinfo and pdftoppm are required for page previews'}
+    info = subprocess.run([pdfinfo, str(pdf)], capture_output=True, timeout=30)
+    info_stdout = decode_output(info.stdout)
+    info_stderr = decode_output(info.stderr)
+    if info.returncode != 0:
+        raise RuntimeError(info_stderr.strip() or 'pdfinfo failed')
+    match = re.search(r'^Pages:\s+(\d+)\s*$', info_stdout, re.MULTILINE)
+    page_count = int(match.group(1)) if match else None
+    prefix = output_dir / 'page'
+    for stale in output_dir.glob('page-*.png'):
+        stale.unlink()
+    raster = subprocess.run([pdftoppm, '-png', '-r', '120', str(pdf), str(prefix)], capture_output=True, timeout=120)
+    if raster.returncode != 0:
+        raise RuntimeError(decode_output(raster.stderr).strip() or 'pdftoppm failed')
+    previews = [str(path) for path in sorted(output_dir.glob('page-*.png'))]
+    creator = re.search(r'^Creator:\s*(.+?)\s*$', info_stdout, re.MULTILINE)
+    producer = re.search(r'^Producer:\s*(.+?)\s*$', info_stdout, re.MULTILINE)
+    return {
+        'page_count': page_count,
+        'previews': previews,
+        'creator': creator.group(1) if creator else None,
+        'producer': producer.group(1) if producer else None,
+        'warning': None,
+    }
+
+
+def _with_pdf_artifacts(report, output_dir):
+    if report.get('status') != 'rendered' or not report.get('pdf'):
+        return report
+    report['pages'] = pdf_artifacts(report['pdf'], Path(output_dir) / 'pages')
+    return report
+
+
+def _render_document(source, output_dir, renderer):
+    output_dir = Path(output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    source = Path(source).resolve()
+    if renderer == 'word' and os.name != 'nt':
+        raise RuntimeError('The requested Word-compatible renderer is unavailable on this platform')
+    if renderer in ('auto', 'word') and os.name == 'nt':
+        powershell = shutil.which('powershell') or shutil.which('pwsh')
+        script = Path(__file__).with_name('render_docx.ps1')
+        if powershell and script.is_file():
+            result = subprocess.run(
+                [powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(script), '-InputPath', str(source), '-OutputDirectory', str(output_dir)],
+                capture_output=True, text=True, encoding='utf-8', timeout=120,
+            )
+            if result.returncode == 0:
+                return _with_pdf_artifacts(json.loads(result.stdout), output_dir)
+            if renderer == 'word':
+                raise RuntimeError(result.stderr.strip() or result.stdout.strip() or 'Word-compatible rendering failed')
+        elif renderer == 'word':
+            raise RuntimeError('The requested Word-compatible renderer is unavailable')
+    if renderer in ('auto', 'libreoffice'):
+        soffice = shutil.which('soffice') or shutil.which('libreoffice')
+        if soffice:
+            result = subprocess.run(
+                [soffice, '--headless', '--convert-to', 'pdf', '--outdir', str(output_dir), str(source)],
+                capture_output=True, text=True, encoding='utf-8', timeout=120,
+            )
+            pdf = output_dir / (source.stem + '.pdf')
+            if result.returncode == 0 and pdf.is_file():
+                return _with_pdf_artifacts({'status': 'rendered', 'renderer': 'LibreOffice', 'pdf': str(pdf), 'cleanup_warning': None}, output_dir)
+            if renderer == 'libreoffice':
+                raise RuntimeError(result.stderr.strip() or result.stdout.strip() or 'LibreOffice rendering failed')
+        elif renderer == 'libreoffice':
+            raise RuntimeError('The requested LibreOffice renderer is unavailable')
+    return {'status': 'unavailable', 'renderer': None, 'pdf': None, 'cleanup_warning': None}
+
+
+def verify_document(source, render='auto', output_dir=None):
+    if render not in {'never', 'auto', 'word', 'libreoffice'}:
+        raise ValueError('render must be never, auto, word, or libreoffice')
+    source = Path(source).resolve()
+    structure = inspect_package(source)
+    reopen = {'status': 'failed'}
+    reopen_error = None
+    try:
+        from docx import Document
+        document = Document(source)
+        reopen = {
+            'status': 'passed',
+            'paragraphs': len(document.paragraphs),
+            'tables': len(document.tables),
+            'sections': len(document.sections),
+            'inline_shapes': len(document.inline_shapes),
+        }
+    except Exception as exc:
+        reopen_error = str(exc)
+        reopen['error'] = reopen_error
+    if render == 'never':
+        rendered = {'status': 'skipped', 'renderer': None, 'pdf': None, 'cleanup_warning': None}
+    else:
+        destination = output_dir or tempfile.mkdtemp(prefix='docx-killer-render-')
+        rendered = _render_document(source, destination, render)
+    limitations = []
+    if rendered['status'] != 'rendered':
+        limitations.append('Layout was not rendered')
+    else:
+        limitations.append('PDF export does not automatically detect clipping, overlap, font substitution, or incorrect pagination; inspect page images')
+    status = 'passed' if not structure['errors'] and reopen_error is None else 'failed'
+    return {'status': status, 'structure': structure, 'reopen': reopen, 'render': rendered, 'limitations': limitations}
+
+
+def parse_paragraph_range(value):
+    try:
+        start, end = value.split(':', 1)
+        return int(start), int(end)
+    except (ValueError, AttributeError) as exc:
+        raise argparse.ArgumentTypeError('Use START:END, for example 0:20') from exc
 
 
 def check_output(source, output):
@@ -169,6 +333,11 @@ def main():
     inspect = commands.add_parser('inspect', help='Inspect package structure; this is not full schema validation')
     inspect.add_argument('input')
     inspect.add_argument('--text', action='store_true', help='Include story text; may contain sensitive document content')
+    inspect.add_argument('--summary', action='store_true', help='Omit the per-part hash inventory')
+    inspect.add_argument('--story', action='append', help='Include one exact story part; repeatable')
+    inspect.add_argument('--paragraph-range', type=parse_paragraph_range, metavar='START:END', help='Include only this half-open paragraph range')
+    inspect.add_argument('--tables', action='store_true', help='Include table row and column counts')
+    inspect.add_argument('--media', action='store_true', help='Include embedded media names and sizes')
     compare = commands.add_parser('compare', help='Compare uncompressed part payloads')
     compare.add_argument('before')
     compare.add_argument('after')
@@ -183,19 +352,25 @@ def main():
     render.add_argument('input')
     render.add_argument('context')
     render.add_argument('output')
+    verify = commands.add_parser('verify', help='Check package structure, python-docx reopening, and optional office rendering')
+    verify.add_argument('input')
+    verify.add_argument('--render', choices=('never', 'auto', 'word', 'libreoffice'), default='auto')
+    verify.add_argument('--output-dir', help='Directory for rendered PDF; created when needed')
     args = parser.parse_args()
     try:
         if args.command == 'inspect':
-            result = inspect_package(args.input, args.text)
+            result = inspect_document(args.input, args.text, args.summary, args.story, args.paragraph_range, args.tables, args.media)
         elif args.command == 'compare':
             result = compare_packages(args.before, args.after)
         elif args.command == 'replace':
             result = replace_text(args.input, args.output, args.old, args.new, args.expected, args.part)
-        else:
+        elif args.command == 'render':
             context = json.loads(Path(args.context).read_text(encoding='utf-8-sig'))
             result = render_template(args.input, args.output, context)
+        else:
+            result = verify_document(args.input, args.render, args.output_dir)
         print(json.dumps(result, ensure_ascii=True, indent=2))
-        return 1 if result.get('errors') else 0
+        return 1 if result.get('errors') or result.get('status') == 'failed' else 0
     except Exception as exc:
         print(json.dumps({'error': str(exc)}, ensure_ascii=True), file=sys.stderr)
         return 1

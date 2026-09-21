@@ -73,6 +73,7 @@ def inspect_entries(entries, include_text=False):
     if main is not None and main.tag != f'{{{W}}}document':
         report['errors'].append('Only Transitional OOXML with word/document.xml is supported; convert Strict OOXML with an office application first')
     features = {'fields': 0, 'revisions': 0, 'content_controls': 0, 'drawings': 0, 'text_boxes': 0, 'bookmarks': 0, 'comments': 0, 'equations': 0}
+    feature_stories = {key: set() for key in features}
     names = {'fldChar': 'fields', 'fldSimple': 'fields', 'ins': 'revisions', 'del': 'revisions', 'moveFrom': 'revisions', 'moveTo': 'revisions', 'sdt': 'content_controls', 'drawing': 'drawings', 'pict': 'drawings', 'txbxContent': 'text_boxes', 'bookmarkStart': 'bookmarks', 'comment': 'comments'}
     for name, root in roots.items():
         if name.endswith('.rels'):
@@ -97,16 +98,25 @@ def inspect_entries(entries, include_text=False):
                     continue
                 local = etree.QName(node).localname
                 if etree.QName(node).namespace == W and local in names:
-                    features[names[local]] += 1
+                    feature = names[local]
+                    features[feature] += 1
+                    feature_stories[feature].add(name)
                 elif local == 'oMath':
                     features['equations'] += 1
+                    feature_stories['equations'].add(name)
     report['features'] = features
+    report['feature_locations'] = {key: sorted(value) for key, value in feature_stories.items() if value}
     if any(name.startswith('_xmlsignatures/') for name in entries):
         report['warnings'].append('Digitally signed package: edits invalidate signatures')
     if any('vbaproject' in name.lower() for name in entries):
         report['warnings'].append('Macro payload present')
     if any(features.values()):
-        report['warnings'].append('Advanced structures present; inspect the affected story before editing')
+        details = []
+        for feature, count in features.items():
+            if count:
+                locations = ', '.join(sorted(feature_stories[feature]))
+                details.append(f'{feature}={count} ({locations})')
+        report['warnings'].append('Advanced structures present: ' + '; '.join(details))
     report['validation_scope'] = 'ZIP reads/CRC, XML well-formedness, conventional DOCX parts, relationship target existence; not XSD validation, rendering, or field correctness'
     return report
 
