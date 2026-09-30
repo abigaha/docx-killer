@@ -33,7 +33,7 @@ soffice --headless --convert-to pdf --outdir render-output output.docx
 
 Use an absolute `file:///...` profile URI with `-env:UserInstallation=...` when isolation is needed. Record LibreOffice version and treat the PDF as LibreOffice's rendering, not proof of Word-identical output.
 
-Microsoft Word automation can open a copy, update selected fields, repaginate, and call `ExportAsFixedFormat` to PDF. Disable macros and automatic external-link updates for inspection. Use a fresh dedicated application instance; close only the document/instance the task created. Do not attach to and quit the user's running application. A COM call may hang on hidden dialogs; use a bounded worker and report failure rather than repeatedly spawning applications. Do not kill all Word/WPS processes.
+Microsoft Word automation can open a copy, update selected fields, repaginate, and call `ExportAsFixedFormat` to PDF. Disable macros and automatic external-link updates for inspection. Use a fresh dedicated application instance; close only the document/instance the task created. Do not attach to and quit the user's running application. A COM call may hang on hidden dialogs; use a bounded worker and report failure rather than repeatedly spawning applications. Do not kill all Word/WPS processes. On Windows installations where `Word.Application` is a WPS compatibility registration, `--render auto` first tries `KWPS.Application`; the JSON report includes `application_progid` and the renderer label so this result is clearly identified as WPS output.
 
 WPS automation availability and API compatibility depend on the installed edition. Use it only after confirming the actual application and operations work. Do not label a WPS-rendered result as Word-verified.
 

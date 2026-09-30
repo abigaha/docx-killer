@@ -99,6 +99,26 @@ def _with_pdf_artifacts(report, output_dir):
     return report
 
 
+def _registered_com_progid(progid):
+    if os.name != 'nt':
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, progid):
+            return True
+    except OSError:
+        return False
+
+
+def _office_progids(renderer):
+    if renderer == 'word':
+        return ['Word.Application']
+    # WPS exposes a separate automation interface. It avoids the Word.Application
+    # compatibility registration hanging on some WPS installations.
+    candidates = ['KWPS.Application', 'Word.Application']
+    return [progid for progid in candidates if _registered_com_progid(progid)]
+
+
 def _render_document(source, output_dir, renderer):
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -108,15 +128,27 @@ def _render_document(source, output_dir, renderer):
     if renderer in ('auto', 'word') and os.name == 'nt':
         powershell = shutil.which('powershell') or shutil.which('pwsh')
         script = Path(__file__).with_name('render_docx.ps1')
-        if powershell and script.is_file():
-            result = subprocess.run(
-                [powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(script), '-InputPath', str(source), '-OutputDirectory', str(output_dir)],
-                capture_output=True, text=True, encoding='utf-8', timeout=120,
-            )
-            if result.returncode == 0:
-                return _with_pdf_artifacts(json.loads(result.stdout), output_dir)
+        progids = _office_progids(renderer)
+        if powershell and script.is_file() and progids:
+            failures = []
+            for progid in progids:
+                try:
+                    result = subprocess.run(
+                        [powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(script), '-InputPath', str(source), '-OutputDirectory', str(output_dir), '-ApplicationProgId', progid],
+                        capture_output=True, text=True, encoding='utf-8', timeout=60,
+                    )
+                except subprocess.TimeoutExpired:
+                    failures.append(f'{progid}: timed out after 60 seconds')
+                    continue
+                if result.returncode == 0:
+                    try:
+                        return _with_pdf_artifacts(json.loads(result.stdout), output_dir)
+                    except (json.JSONDecodeError, OSError, RuntimeError) as exc:
+                        failures.append(f'{progid}: invalid renderer output: {exc}')
+                        continue
+                failures.append(f'{progid}: {result.stderr.strip() or result.stdout.strip() or "rendering failed"}')
             if renderer == 'word':
-                raise RuntimeError(result.stderr.strip() or result.stdout.strip() or 'Word-compatible rendering failed')
+                raise RuntimeError('; '.join(failures) or 'Word-compatible renderer failed')
         elif renderer == 'word':
             raise RuntimeError('The requested Word-compatible renderer is unavailable')
     if renderer in ('auto', 'libreoffice'):

@@ -252,6 +252,11 @@ class DocumentOperations(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'renderer is unavailable'):
                 ops._render_document(self.source, self.root / 'render', 'word')
 
+    def test_auto_renderer_prefers_registered_wps_interface(self):
+        with mock.patch.object(ops, '_registered_com_progid', side_effect=lambda progid: progid in {'KWPS.Application', 'Word.Application'}):
+            self.assertEqual(ops._office_progids('auto'), ['KWPS.Application', 'Word.Application'])
+            self.assertEqual(ops._office_progids('word'), ['Word.Application'])
+
     def test_cli_verify_and_filtered_inspect_emit_json(self):
         import json
         import subprocess

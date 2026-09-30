@@ -47,12 +47,21 @@ def diagnose():
             tools['mammoth']['reason'] = str(exc)
     else:
         tools['mammoth']['reason'] = 'Node.js not found on PATH'
-    renderers = {'libreoffice': shutil.which('soffice'), 'word_registered': False}
+    renderers = {
+        'libreoffice': shutil.which('soffice'),
+        'word_registered': False,
+        'wps_registered': False,
+    }
     if sys.platform == 'win32':
         import winreg
         try:
             with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r'Word.Application\CLSID'):
                 renderers['word_registered'] = True
+        except OSError:
+            pass
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r'KWPS.Application'):
+                renderers['wps_registered'] = True
         except OSError:
             pass
         for variable in ('ProgramFiles', 'ProgramFiles(x86)'):

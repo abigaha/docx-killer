@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$InputPath,
-    [Parameter(Mandatory = $true)][string]$OutputDirectory
+    [Parameter(Mandatory = $true)][string]$OutputDirectory,
+    [string]$ApplicationProgId = 'Word.Application'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -8,16 +9,19 @@ $source = (Resolve-Path -LiteralPath $InputPath).Path
 $destination = [System.IO.Path]::GetFullPath($OutputDirectory)
 [System.IO.Directory]::CreateDirectory($destination) | Out-Null
 $pdf = Join-Path $destination ([System.IO.Path]::GetFileNameWithoutExtension($source) + '.pdf')
+$null = Remove-Item -LiteralPath $pdf -Force -ErrorAction SilentlyContinue
 $application = $null
 $document = $null
 $cleanupWarning = $null
 $exported = $false
 
 try {
-    $application = New-Object -ComObject Word.Application
+    $application = New-Object -ComObject $ApplicationProgId
     $application.Visible = $false
     $application.DisplayAlerts = 0
-    $document = $application.Documents.Open($source, $false, $true)
+    try { $application.AutomationSecurity = 3 } catch {}
+    try { $application.Options.UpdateLinksAtOpen = $false } catch {}
+    $document = $application.Documents.Open($source, $false, $true, $false)
     $document.ExportAsFixedFormat($pdf, 17)
     $exported = Test-Path -LiteralPath $pdf
     $renderer = $application.Name
@@ -41,7 +45,8 @@ try {
 if (-not $exported) { throw 'The Word-compatible application did not create a PDF' }
 [ordered]@{
     status = 'rendered'
-    renderer = "$renderer $version"
+    application_progid = $ApplicationProgId
+    renderer = "$ApplicationProgId / $renderer $version"
     pdf = $pdf
     cleanup_warning = $cleanupWarning
 } | ConvertTo-Json -Compress

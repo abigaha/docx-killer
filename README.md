@@ -37,6 +37,6 @@ python skills/docx-killer/scripts/docx_ops.py verify generated.docx --render aut
 node skills/docx-killer/scripts/mammoth_extract.cjs input.docx preview.html
 ```
 
-`verify` checks package structure and reopens the document with `python-docx`. When an Office renderer is available it also exports a PDF and, when Poppler is installed, creates one PNG preview per page. The JSON report distinguishes skipped, unavailable, and rendered states; PDF export does not by itself prove correct pagination or absence of visual overlap.
+`verify` checks package structure and reopens the document with `python-docx`. When an Office renderer is available it also exports a PDF and, when Poppler is installed, creates one PNG preview per page. On Windows, auto rendering uses `KWPS.Application` before `Word.Application` when WPS is registered, and records the selected COM ProgID in the JSON report. The JSON report distinguishes skipped, unavailable, and rendered states; PDF export does not by itself prove correct pagination or absence of visual overlap.
 
 Read [the skill](skills/docx-killer/SKILL.md) for selection rules and [verification](skills/docx-killer/references/verification.md) for the limits of structural versus visual checks.

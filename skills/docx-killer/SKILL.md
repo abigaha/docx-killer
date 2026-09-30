@@ -29,7 +29,7 @@ Separate package structure, reopened content, and rendered appearance. Use `veri
 
 ## Verification
 
-Run `python scripts/docx_ops.py verify output.docx --render auto --output-dir render-output` before claiming completion. `--render never` performs package inspection and python-docx reopening only. `--render auto` tries the Windows Word-compatible application first and LibreOffice second; `--render word` or `--render libreoffice` require that renderer. A successful PDF export still requires visual inspection of the generated page PNGs for clipping, overlap, pagination, and font substitution.
+Run `python scripts/docx_ops.py verify output.docx --render auto --output-dir render-output` before claiming completion. `--render never` performs package inspection and python-docx reopening only. On Windows, `--render auto` tries the registered WPS automation interface (`KWPS.Application`) before the Word-compatible interface, then LibreOffice. `--render word` requires the Word-compatible interface; `--render libreoffice` requires LibreOffice. A successful PDF export still requires visual inspection of the generated page PNGs for clipping, overlap, pagination, and font substitution. The JSON report records the COM ProgID separately so WPS output is not presented as Word-verified.
 
 ## Reliable defaults
 
