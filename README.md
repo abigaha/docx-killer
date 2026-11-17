@@ -12,12 +12,13 @@ Do not overwrite an existing locally modified skill without comparing it first. 
 
 ## Dependencies
 
-- Python with `python-docx`, `docxtpl`, `lxml`, and `Jinja2`; compatible ranges are in `requirements.txt`.
+- Python with `python-docx`, `docxtpl`, `lxml`, and `Jinja2`; compatible ranges ship in `skills/docx-killer/requirements.txt`. The root `requirements.txt` includes that file for repository installs.
 - Pandoc executable.
-- Node.js with `npm install -g mammoth` or a locally resolvable Mammoth package.
+- Node.js with `npm install -g mammoth` or a Mammoth package selected with `MAMMOTH_MODULE`. For a project-local installation, set this variable to its absolute package directory; Node resolves modules relative to the skill script, not the working directory.
 - An office application for actual layout verification, when required; the four tools alone do not render Word pages.
 
 ```powershell
+python -m pip install -r skills/docx-killer/requirements.txt
 python skills/docx-killer/scripts/doctor.py
 python skills/docx-killer/scripts/docx_ops.py --help
 python -m unittest discover -s tests -v
@@ -37,6 +38,6 @@ python skills/docx-killer/scripts/docx_ops.py verify generated.docx --render aut
 node skills/docx-killer/scripts/mammoth_extract.cjs input.docx preview.html
 ```
 
-`verify` checks package structure and reopens the document with `python-docx`. When an Office renderer is available it also exports a PDF and, when Poppler is installed, creates one PNG preview per page. On Windows, auto rendering uses `KWPS.Application` before `Word.Application` when WPS is registered, and records the selected COM ProgID in the JSON report. The JSON report distinguishes skipped, unavailable, and rendered states; PDF export does not by itself prove correct pagination or absence of visual overlap.
+For a new or modified DOCX, `verify` checks package structure and reopens it with `python-docx`. Read-only inspection and HTML/Markdown/text conversion should instead verify their actual findings or output artifact. When an Office renderer is available, `verify` also exports a PDF and, when Poppler is installed, creates one PNG preview per page. Each renderer attempt uses a dedicated empty work directory, and an existing destination PDF is never overwritten. On Windows, auto rendering tries `KWPS.Application` before `Word.Application`, then LibreOffice, and records the selected COM ProgID. `--render word` tries only `Word.Application`; use `--render auto` for WPS. The report distinguishes skipped, unavailable, failed, and rendered states and retains failed-attempt reasons after fallback. PDF export does not by itself prove correct pagination or absence of visual overlap.
 
 Read [the skill](skills/docx-killer/SKILL.md) for selection rules and [verification](skills/docx-killer/references/verification.md) for the limits of structural versus visual checks.

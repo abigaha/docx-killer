@@ -22,6 +22,19 @@ def find_pandoc():
     return next((str(path) for path in candidates if path.is_file()), None)
 
 
+def find_libreoffice():
+    found = shutil.which('soffice') or shutil.which('libreoffice')
+    if found:
+        return found
+    for variable in ('ProgramFiles', 'ProgramFiles(x86)'):
+        base = os.environ.get(variable)
+        if base:
+            path = Path(base) / 'LibreOffice' / 'program' / 'soffice.exe'
+            if path.is_file():
+                return str(path)
+    return None
+
+
 def diagnose():
     tools = {}
     for name in ('python-docx', 'docxtpl', 'lxml', 'jinja2'):
@@ -48,7 +61,7 @@ def diagnose():
     else:
         tools['mammoth']['reason'] = 'Node.js not found on PATH'
     renderers = {
-        'libreoffice': shutil.which('soffice'),
+        'libreoffice': find_libreoffice(),
         'word_registered': False,
         'wps_registered': False,
     }
@@ -64,12 +77,6 @@ def diagnose():
                 renderers['wps_registered'] = True
         except OSError:
             pass
-        for variable in ('ProgramFiles', 'ProgramFiles(x86)'):
-            base = os.environ.get(variable)
-            if base:
-                path = Path(base) / 'LibreOffice' / 'program' / 'soffice.exe'
-                if path.is_file():
-                    renderers['libreoffice'] = str(path)
     return {'python': sys.executable, 'python_version': sys.version.split()[0], 'tools': tools, 'renderers': renderers, 'note': 'Installed tools do not establish Word/WPS layout fidelity; renderer discovery does not execute an office application'}
 
 

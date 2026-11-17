@@ -29,13 +29,15 @@ Separate package structure, reopened content, and rendered appearance. Use `veri
 
 ## Verification
 
-Run `python scripts/docx_ops.py verify output.docx --render auto --output-dir render-output` before claiming completion. `--render never` performs package inspection and python-docx reopening only. On Windows, `--render auto` tries the registered WPS automation interface (`KWPS.Application`) before the Word-compatible interface, then LibreOffice. `--render word` requires the Word-compatible interface; `--render libreoffice` requires LibreOffice. A successful PDF export still requires visual inspection of the generated page PNGs for clipping, overlap, pagination, and font substitution. The JSON report records the COM ProgID separately so WPS output is not presented as Word-verified.
+For a newly created or modified DOCX, run `python scripts/docx_ops.py verify output.docx --render auto --output-dir render-output` before claiming completion. For read-only inspection or HTML/Markdown/text conversion, verify the requested findings or actual output artifact instead.
+
+`--render never` checks package structure and python-docx reopening only. On Windows, `--render auto` tries `KWPS.Application` (WPS), then `Word.Application`, then LibreOffice; `--render word` tries only `Word.Application`. Each attempt uses a dedicated empty work directory and refuses to overwrite an existing destination PDF. The report distinguishes unavailable renderers from failed attempts and retains failure reasons after fallback. Inspect generated pages for clipping, overlap, pagination, and font substitution; a PDF export alone does not prove correct appearance. See [verification](references/verification.md) for status and renderer limits.
 
 ## Reliable defaults
 
 - `replace` defaults to `word/document.xml` only, including its tables. Headers/footers/notes/comments require explicit `--part` selection. Require an independently counted `--expected`; new text inherits the first matched run's formatting. Runs can split words invisibly.
 - Avoid `paragraph.text = ...` and `cell.text = ...` when preserving existing inline content. These operations rebuild content. Public APIs do not cover every story or OOXML feature.
-- Render trusted templates with strict undefined values and autoescaping. JSON data is not template source. Plain text goes into ordinary variables, not arbitrary XML/RichText.
+- Render trusted templates with strict undefined values and XML autoescaping; validate required values and business rules separately. The CLI also renders footnotes/endnotes/comments once per part; verify values in each affected story. JSON data is not template source. Plain text goes into ordinary variables, not arbitrary XML/RichText.
 - Pandoc `--reference-doc` supplies styles and document properties; it does not preserve the original body as a template. Mammoth HTML is semantic, not a visual rendering, and is not sanitized.
 - Work on a new DOCX and compare parts with `docx_ops.py compare before.docx after.docx`. Review unexpected media, relationship, numbering, style, and section changes.
 - Treat advanced-structure warnings as location-specific evidence: the inspector names feature counts and affected stories. A warning is a review cue, not an automatic failure.

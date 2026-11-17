@@ -21,3 +21,11 @@ PDF export succeeded; closing the automation instance returned RPC unavailable (
 ## Boundaries
 
 The inspector is not an OOXML XSD validator. Tests do not establish arbitrary DOCX compatibility, exact Word pagination, general tracked-change editing, or lossless format conversion. Layout-sensitive user tasks still require document-specific rendering and inspection.
+
+## Review fixes verified on 2026-11-17
+
+`python -m unittest discover -s tests -v` passed all 47 tests. New regressions first failed against the original code, then passed after fixes: multi-section footnotes retain literal template-like data, endnotes/comments render with strict missing-value and escaping checks, renderer attempts use empty staging directories, existing PDFs survive failures, and missing output cannot be mistaken for a successful export.
+
+Rendering tests also cover shared LibreOffice discovery, fallback diagnostics, failed-render CLI exit status, Unicode PowerShell JSON, and retained PDFs/reports when preview generation or staging cleanup fails. The PowerShell script ran with mocked COM objects; no real Office application was started for this update.
+
+Skill metadata validation and `git diff --check` passed. Both repository and packaged requirements parsed in offline pip dry runs without installing or upgrading dependencies. An independent agent used the updated skill to extract a synthetic DOCX to UTF-8 text, confirmed its content against the source XML and unchanged source hash, and completed without Office rendering.

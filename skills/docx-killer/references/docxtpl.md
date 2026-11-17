@@ -8,7 +8,9 @@ Use when the template defines the layout and variables/conditions/repeated regio
 python scripts/docx_ops.py render invoice-template.docx context.json invoice.docx
 ```
 
-The helper uses `Environment(undefined=StrictUndefined, autoescape=True)` and `render(..., autoescape=True)`. A missing nested property fails rather than silently producing an empty string. `null`, empty values, arithmetic correctness, and business requirements still need separate validation; StrictUndefined does not validate them.
+The helper uses `Environment(undefined=StrictUndefined, autoescape=True)` and `render(..., autoescape=True)`. A missing nested property fails rather than silently producing an empty string; autoescaping protects ordinary text in XML. Neither validates `null`, empty values, arithmetic correctness, or business requirements.
+
+The CLI renders existing footnotes, endnotes, and comments once per part, including parts shared by multiple story relationships. Check rendered values separately in the body, headers/footers, notes, and comments; a body-only text check cannot confirm the other stories.
 
 Example context:
 

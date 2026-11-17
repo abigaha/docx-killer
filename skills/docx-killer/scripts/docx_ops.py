@@ -15,6 +15,7 @@ from zipfile import ZipFile
 from lxml import etree
 
 from docx_package import W, NS, compare_packages, inspect_entries, inspect_package, load_package, paragraph_text, parse_xml
+from doctor import find_libreoffice
 
 
 def decode_output(data):
@@ -74,12 +75,15 @@ def pdf_artifacts(pdf, output_dir):
         raise RuntimeError(info_stderr.strip() or 'pdfinfo failed')
     match = re.search(r'^Pages:\s+(\d+)\s*$', info_stdout, re.MULTILINE)
     page_count = int(match.group(1)) if match else None
-    prefix = output_dir / 'page'
-    for stale in output_dir.glob('page-*.png'):
-        stale.unlink()
-    raster = subprocess.run([pdftoppm, '-png', '-r', '120', str(pdf), str(prefix)], capture_output=True, timeout=120)
-    if raster.returncode != 0:
-        raise RuntimeError(decode_output(raster.stderr).strip() or 'pdftoppm failed')
+    with tempfile.TemporaryDirectory(prefix='.docx-killer-pages-', dir=output_dir) as staging:
+        prefix = Path(staging) / 'page'
+        raster = subprocess.run([pdftoppm, '-png', '-r', '120', str(pdf), str(prefix)], capture_output=True, timeout=120)
+        if raster.returncode != 0:
+            raise RuntimeError(decode_output(raster.stderr).strip() or 'pdftoppm failed')
+        for stale in output_dir.glob('page-*.png'):
+            stale.unlink()
+        for preview in Path(staging).glob('page-*.png'):
+            preview.rename(output_dir / preview.name)
     previews = [str(path) for path in sorted(output_dir.glob('page-*.png'))]
     creator = re.search(r'^Creator:\s*(.+?)\s*$', info_stdout, re.MULTILINE)
     producer = re.search(r'^Producer:\s*(.+?)\s*$', info_stdout, re.MULTILINE)
@@ -95,7 +99,10 @@ def pdf_artifacts(pdf, output_dir):
 def _with_pdf_artifacts(report, output_dir):
     if report.get('status') != 'rendered' or not report.get('pdf'):
         return report
-    report['pages'] = pdf_artifacts(report['pdf'], Path(output_dir) / 'pages')
+    try:
+        report['pages'] = pdf_artifacts(report['pdf'], Path(output_dir) / 'pages')
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        report['pages'] = {'page_count': None, 'previews': [], 'warning': f'Page preview generation failed: {exc}'}
     return report
 
 
@@ -123,49 +130,63 @@ def _render_document(source, output_dir, renderer):
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     source = Path(source).resolve()
+    pdf = output_dir / (source.stem + '.pdf')
+    if pdf.exists():
+        raise FileExistsError('Output already exists: ' + str(pdf))
     if renderer == 'word' and os.name != 'nt':
         raise RuntimeError('The requested Word-compatible renderer is unavailable on this platform')
+    candidates = []
     if renderer in ('auto', 'word') and os.name == 'nt':
         powershell = shutil.which('powershell') or shutil.which('pwsh')
         script = Path(__file__).with_name('render_docx.ps1')
         progids = _office_progids(renderer)
         if powershell and script.is_file() and progids:
-            failures = []
-            for progid in progids:
-                try:
-                    result = subprocess.run(
-                        [powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(script), '-InputPath', str(source), '-OutputDirectory', str(output_dir), '-ApplicationProgId', progid],
-                        capture_output=True, text=True, encoding='utf-8', timeout=60,
-                    )
-                except subprocess.TimeoutExpired:
-                    failures.append(f'{progid}: timed out after 60 seconds')
-                    continue
-                if result.returncode == 0:
-                    try:
-                        return _with_pdf_artifacts(json.loads(result.stdout), output_dir)
-                    except (json.JSONDecodeError, OSError, RuntimeError) as exc:
-                        failures.append(f'{progid}: invalid renderer output: {exc}')
-                        continue
-                failures.append(f'{progid}: {result.stderr.strip() or result.stdout.strip() or "rendering failed"}')
-            if renderer == 'word':
-                raise RuntimeError('; '.join(failures) or 'Word-compatible renderer failed')
-        elif renderer == 'word':
-            raise RuntimeError('The requested Word-compatible renderer is unavailable')
+            candidates.extend((progid, powershell, 60) for progid in progids)
     if renderer in ('auto', 'libreoffice'):
-        soffice = shutil.which('soffice') or shutil.which('libreoffice')
+        soffice = find_libreoffice()
         if soffice:
-            result = subprocess.run(
-                [soffice, '--headless', '--convert-to', 'pdf', '--outdir', str(output_dir), str(source)],
-                capture_output=True, text=True, encoding='utf-8', timeout=120,
-            )
-            pdf = output_dir / (source.stem + '.pdf')
-            if result.returncode == 0 and pdf.is_file():
-                return _with_pdf_artifacts({'status': 'rendered', 'renderer': 'LibreOffice', 'pdf': str(pdf), 'cleanup_warning': None}, output_dir)
-            if renderer == 'libreoffice':
-                raise RuntimeError(result.stderr.strip() or result.stdout.strip() or 'LibreOffice rendering failed')
-        elif renderer == 'libreoffice':
-            raise RuntimeError('The requested LibreOffice renderer is unavailable')
-    return {'status': 'unavailable', 'renderer': None, 'pdf': None, 'cleanup_warning': None}
+            candidates.append(('LibreOffice', soffice, 120))
+    if not candidates and renderer != 'auto':
+        name = 'Word-compatible' if renderer == 'word' else 'LibreOffice'
+        raise RuntimeError(f'The requested {name} renderer is unavailable')
+    errors, attempts = [], []
+    for name, executable, timeout in candidates:
+        published = False
+        try:
+            with tempfile.TemporaryDirectory(prefix='.docx-killer-render-', dir=output_dir) as staging:
+                staged_pdf = Path(staging) / pdf.name
+                if name == 'LibreOffice':
+                    command = [executable, '--headless', '--convert-to', 'pdf', '--outdir', staging, str(source)]
+                else:
+                    command = [executable, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(script), '-InputPath', str(source), '-OutputDirectory', staging, '-ApplicationProgId', name]
+                result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', timeout=timeout)
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.strip() or result.stdout.strip() or 'rendering failed')
+                if name == 'LibreOffice':
+                    report = {'status': 'rendered', 'renderer': name, 'cleanup_warning': None}
+                else:
+                    report = json.loads(result.stdout)
+                    if not isinstance(report, dict) or report.get('status') != 'rendered' or report.get('pdf') != str(staged_pdf):
+                        raise ValueError('Invalid renderer output')
+                if not staged_pdf.is_file():
+                    raise RuntimeError('The renderer did not create a PDF')
+                os.link(staged_pdf, pdf)
+                report['pdf'] = str(pdf)
+                published = True
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            if published:
+                report['cleanup_warning'] = '; '.join(filter(None, [report.get('cleanup_warning'), str(exc)]))
+            else:
+                error = f'{name}: {exc}'
+                errors.append(error)
+                attempts.append({'renderer': name, 'status': 'failed', 'error': error})
+                continue
+        attempts.append({'renderer': name, 'status': 'rendered'})
+        report.update(attempts=attempts, errors=errors)
+        return _with_pdf_artifacts(report, output_dir)
+    if errors and renderer != 'auto':
+        raise RuntimeError('; '.join(errors))
+    return {'status': 'failed' if errors else 'unavailable', 'renderer': None, 'pdf': None, 'cleanup_warning': None, 'attempts': attempts, 'errors': errors}
 
 
 def verify_document(source, render='auto', output_dir=None):
@@ -192,12 +213,17 @@ def verify_document(source, render='auto', output_dir=None):
         rendered = {'status': 'skipped', 'renderer': None, 'pdf': None, 'cleanup_warning': None}
     else:
         destination = output_dir or tempfile.mkdtemp(prefix='docx-killer-render-')
-        rendered = _render_document(source, destination, render)
+        try:
+            rendered = _render_document(source, destination, render)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            rendered = {'status': 'failed', 'renderer': None, 'pdf': None, 'cleanup_warning': None, 'attempts': [], 'errors': [str(exc)]}
     limitations = []
     if rendered['status'] != 'rendered':
         limitations.append('Layout was not rendered')
     else:
         limitations.append('PDF export does not automatically detect clipping, overlap, font substitution, or incorrect pagination; inspect page images')
+        if rendered.get('pages', {}).get('warning'):
+            limitations.append(rendered['pages']['warning'])
     status = 'passed' if not structure['errors'] and reopen_error is None else 'failed'
     return {'status': status, 'structure': structure, 'reopen': reopen, 'render': rendered, 'limitations': limitations}
 
@@ -346,13 +372,27 @@ def replace_text(source, output, old, new, expected, parts=None):
 
 def render_template(source, output, context):
     from docxtpl import DocxTemplate
+    from docx.opc.constants import CONTENT_TYPE as CT
+    from docx.opc.part import XmlPart
     from jinja2 import Environment, StrictUndefined
+
+    class StoryTemplate(DocxTemplate):
+        def render_footnotes(self, context, jinja_env=None):
+            # docxtpl 0.20 repeats footnotes per section; render each story part once.
+            for part in self.docx.part.package.parts:
+                if part.content_type in {CT.WML_FOOTNOTES, CT.WML_ENDNOTES, CT.WML_COMMENTS}:
+                    xml = self.patch_xml(part.blob.decode('utf-8'))
+                    rendered = self.render_xml_part(xml, part, context, jinja_env).encode('utf-8')
+                    if isinstance(part, XmlPart):
+                        part._element = parse_xml(rendered)
+                    else:
+                        part._blob = rendered
 
     output = check_output(source, output)
     editable_package(source)
     if not isinstance(context, dict):
         raise ValueError('Template context must be a JSON object')
-    template = DocxTemplate(source)
+    template = StoryTemplate(source)
     environment = Environment(undefined=StrictUndefined, autoescape=True)
     template.render(context, jinja_env=environment, autoescape=True)
     publish(output, template.save)
@@ -402,7 +442,7 @@ def main():
         else:
             result = verify_document(args.input, args.render, args.output_dir)
         print(json.dumps(result, ensure_ascii=True, indent=2))
-        return 1 if result.get('errors') or result.get('status') == 'failed' else 0
+        return 1 if result.get('errors') or result.get('status') == 'failed' or result.get('render', {}).get('status') == 'failed' else 0
     except Exception as exc:
         print(json.dumps({'error': str(exc)}, ensure_ascii=True), file=sys.stderr)
         return 1

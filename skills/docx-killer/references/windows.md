@@ -17,10 +17,10 @@ Use `python -m pip` with the interpreter that runs the scripts. The template pac
 If installation is requested on a new computer:
 
 ```powershell
-python -m pip install python-docx docxtpl
+python -m pip install -r requirements.txt
 ```
 
-Use a virtual environment for project isolation when appropriate; do not upgrade an existing working global environment unnecessarily.
+Run this from the installed skill directory, whose `requirements.txt` ships the compatible ranges. Use a virtual environment for project isolation when appropriate; do not upgrade an existing working global environment unnecessarily.
 
 ## Pandoc
 
@@ -41,7 +41,7 @@ npm root -g
 node scripts/mammoth_extract.cjs --doctor
 ```
 
-Node's `require('mammoth')` does not normally search npm global packages. The wrapper tries local module resolution, `%APPDATA%\npm\node_modules\mammoth`, and the Node installation directory. For a custom prefix:
+Node's `require('mammoth')` does not normally search npm global packages. The wrapper tries module resolution from the skill script's location, `%APPDATA%\npm\node_modules\mammoth`, and the Node installation directory. A package installed only in the current project's `node_modules` needs an explicit absolute `MAMMOTH_MODULE` path. For a custom global prefix:
 
 ```powershell
 $npmGlobalRoot = npm root -g
@@ -49,7 +49,7 @@ $env:MAMMOTH_MODULE = Join-Path $npmGlobalRoot 'mammoth'
 node scripts/mammoth_extract.cjs input.docx preview.html
 ```
 
-The override expects a trusted installed package directory, not an arbitrary downloaded JS file. It applies only to that terminal session. Do not add user-specific absolute paths to the shared skill.
+For a project-local installation, set `$env:MAMMOTH_MODULE = (Resolve-Path './node_modules/mammoth').Path` from that project. The override expects a trusted installed package directory, not an arbitrary downloaded JS file. It applies only to that terminal session. Do not add user-specific absolute paths to the shared skill.
 
 ## Encoding and output files
 

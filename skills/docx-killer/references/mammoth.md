@@ -7,7 +7,7 @@ node scripts/mammoth_extract.cjs input.docx semantic-preview.html
 node scripts/mammoth_extract.cjs input.docx content.txt --text
 ```
 
-The wrapper resolves local or Windows global npm installations, returns conversion messages as JSON, and refuses existing output paths. HTML is a full UTF-8 document with a restrictive CSP; this does **not** make it sanitized. It is a semantic reading artifact, not evidence of pagination or fidelity.
+The wrapper resolves modules from the skill script's location or Windows global npm installations, returns conversion messages as JSON, and refuses existing output paths. For a project-local package, set `MAMMOTH_MODULE` to its absolute package directory; changing the working directory does not change Node's module search base. HTML is a full UTF-8 document with a restrictive CSP; this does **not** make it sanitized. It is a semantic reading artifact, not evidence of pagination or fidelity.
 
 ## Library use for custom extraction
 
