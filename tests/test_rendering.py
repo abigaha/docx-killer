@@ -165,6 +165,47 @@ class Rendering(unittest.TestCase):
                 ops.pdf_artifacts(self.pdf, pages)
         self.assertEqual(previous.read_bytes(), b'previous preview')
 
+    def test_pdf_metadata_empty_fields_do_not_consume_following_lines(self):
+        self.pdf.write_bytes(b'PDF')
+        for creator, producer in [('', ''), ('WPS 文字', ''), ('', 'Test PDF Producer')]:
+            with self.subTest(creator=creator, producer=producer):
+                metadata = f'Creator: \t {creator} \r\nProducer: \t {producer} \r\nCreationDate: Tue Nov 17 2026\r\nPages: 1\r\n'
+
+                def run(command, **kwargs):
+                    if command[0] == 'pdfinfo':
+                        return subprocess.CompletedProcess(command, 0, metadata.encode('utf-8'), b'')
+                    Path(str(command[-1]) + '-1.png').write_bytes(b'preview')
+                    return subprocess.CompletedProcess(command, 0, b'', b'')
+
+                with mock.patch.object(ops.locale, 'getpreferredencoding', return_value='utf-8'), mock.patch.object(ops.shutil, 'which', side_effect=lambda name: name), mock.patch.object(ops.subprocess, 'run', side_effect=run):
+                    report = ops.pdf_artifacts(self.pdf, self.output / 'pages')
+                self.assertEqual(report['creator'], creator or None)
+                self.assertEqual(report['producer'], producer or None)
+
+    def test_pdf_metadata_decodes_fields_independently_of_local_date(self):
+        self.pdf.write_bytes(b'PDF')
+        cases = [
+            ('cp936', 'utf-8', 'WPS 文字', 'PDF 引擎'),
+            ('cp1252', 'utf-8', 'WPS 文字', 'PDF 引擎'),
+            ('cp936', 'cp936', 'WPS 文字', 'PDF 引擎'),
+            ('cp1252', 'cp1252', 'Créateur', 'Éditeur'),
+        ]
+        for locale_encoding, metadata_encoding, creator, producer in cases:
+            with self.subTest(locale=locale_encoding, metadata=metadata_encoding):
+                metadata = f'Creator: {creator}\r\nProducer: {producer}\r\n'.encode(metadata_encoding)
+                metadata += 'CreationDate: Tue Nov 17 2026 中国标准时间\r\nPages: 1\r\n'.encode('cp936')
+
+                def run(command, **kwargs):
+                    if command[0] == 'pdfinfo':
+                        return subprocess.CompletedProcess(command, 0, metadata, b'')
+                    Path(str(command[-1]) + '-1.png').write_bytes(b'preview')
+                    return subprocess.CompletedProcess(command, 0, b'', b'')
+
+                with mock.patch.object(ops.locale, 'getpreferredencoding', return_value=locale_encoding), mock.patch.object(ops.shutil, 'which', side_effect=lambda name: name), mock.patch.object(ops.subprocess, 'run', side_effect=run):
+                    report = ops.pdf_artifacts(self.pdf, self.output / 'pages')
+                self.assertEqual(report['creator'], creator)
+                self.assertEqual(report['producer'], producer)
+
     def test_preview_failure_retains_successful_pdf_export_and_diagnostics(self):
         def run(command, **kwargs):
             if command[0] == 'soffice':

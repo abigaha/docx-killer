@@ -85,13 +85,21 @@ def pdf_artifacts(pdf, output_dir):
         for preview in Path(staging).glob('page-*.png'):
             preview.rename(output_dir / preview.name)
     previews = [str(path) for path in sorted(output_dir.glob('page-*.png'))]
-    creator = re.search(r'^Creator:\s*(.+?)\s*$', info_stdout, re.MULTILINE)
-    producer = re.search(r'^Producer:\s*(.+?)\s*$', info_stdout, re.MULTILINE)
+    metadata = {}
+    # Poppler can mix UTF-8 metadata with localized date text.
+    for name in ('Creator', 'Producer'):
+        match = re.search(rb'^' + name.encode('ascii') + rb':[ \t]*([^\r\n]*)', info.stdout, re.MULTILINE)
+        raw = match.group(1).strip() if match else b''
+        try:
+            value = raw.decode('utf-8')
+        except UnicodeDecodeError:
+            value = decode_output(raw)
+        metadata[name] = value or None
     return {
         'page_count': page_count,
         'previews': previews,
-        'creator': creator.group(1) if creator else None,
-        'producer': producer.group(1) if producer else None,
+        'creator': metadata['Creator'],
+        'producer': metadata['Producer'],
         'warning': None,
     }
 
